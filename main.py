@@ -17,6 +17,12 @@ ROOMS = {
     "EMA200": os.environ.get("CHAT_EMA200"),
     "거가중100": os.environ.get("CHAT_VWAP100"),
 }
+CROSS_ROOMS = {"골크": os.environ.get("CHAT_GC"), "데크": os.environ.get("CHAT_DC")}
+ALIGN_ROOMS = {"정배열": os.environ.get("CHAT_BULL"), "역배열": os.environ.get("CHAT_BEAR")}
+ALIGN = [7, 20, 50, 120, 200]   # 정배열 = 7>20>50>120>200
+PAIRS = [(7, 20), (7, 50), (20, 50), (50, 200)]   # 골크/데크를 볼 이평 짝
+GAP = 0.003      # 두 이평 차이가 가격의 0.3% 안이면 '근접'
+CROSS_SURGE = 1.5  # 골크/데크 근접은 거래대금 평균의 1.5배 이상
 BASE = "https://www.okx.com"
 BAR = "15m"      # 봉 종류
 TOP_N = 100      # 거래대금 상위 몇 개 코인을 볼지
@@ -96,6 +102,46 @@ def plan(df, col):
     return side, entry, sl, tp
 
 
+def cross_check(df, f, s_):
+    a, b = df[f"ema{f}"], df[f"ema{s_}"]
+    g = (a - b).iloc[-4:].values
+    price = df["c"].iloc[-1]
+    if abs(g[-1]) / price > GAP:
+        return None
+    if g[-1] < 0 and g[-2] < 0 and g[-1] > g[-2] > g[-3]:
+        return "골크"
+    if g[-1] > 0 and g[-2] > 0 and g[-1] < g[-2] < g[-3]:
+        return "데크"
+    return None
+
+
+def align_check(df):
+    last = df.iloc[-1]
+    v = [last[f"ema{n}"] for n in ALIGN]
+    up = [v[i] > v[i + 1] for i in range(len(v) - 1)]
+    for kind, ok in (("정배열", up), ("역배열", [not u for u in up])):
+        bad = [i for i, o in enumerate(ok) if not o]
+        if len(bad) != 1:
+            continue
+        f, s_ = ALIGN[bad[0]], ALIGN[bad[0] + 1]
+        want = "골크" if kind == "정배열" else "데크"
+        if cross_check(df, f, s_) == want:
+            return kind, f, s_
+    return None
+
+
+def cross_plan(df, kind, s_):
+    last = df.iloc[-1]
+    entry, slow, atr = last["c"], last[f"ema{s_}"], last["atr"]
+    if kind == "골크":
+        sl = min(df["l"].iloc[-5:].min(), slow) - 0.3 * atr
+        sl = min(sl, entry - 0.5 * atr)
+        return "롱", entry, sl, entry + RR * (entry - sl)
+    sl = max(df["h"].iloc[-5:].max(), slow) + 0.3 * atr
+    sl = max(sl, entry + 0.5 * atr)
+    return "숏", entry, sl, entry - RR * (sl - entry)
+
+
 def fmt(v):
     if v >= 100:
         return f"{v:,.2f}"
@@ -137,7 +183,7 @@ def draw(df, title, path, only, pl):
         p.vlines(i, r["l"], r["h"], color=col, lw=0.8)
         p.bar(i, abs(r["c"] - r["o"]), bottom=min(r["o"], r["c"]), color=col, width=0.7)
     for label, c, color in LINES:
-        if label == only:
+        if label in only:
             p.plot(x, d[c], color=color, lw=2.2, label=label)
     side, entry, sl, tp = pl
     for v, name, color in ((tp, "익절", "#2e7d32"), (entry, "진입", "#000000"), (sl, "손절", "#c62828")):
@@ -177,6 +223,60 @@ def send(path, caption, chat):
                   files={"photo": open(path, "rb")}, timeout=30)
 
 
+def do_cross(df, inst, coin, ts, state):
+    if len(df) < 210:
+        return
+    base = df["turn"].iloc[-21:-1].mean()
+    ratio = df["turn"].iloc[-1] / base if base > 0 else 0
+    if ratio < CROSS_SURGE:
+        return
+    for f, s_ in PAIRS:
+        kind = cross_check(df, f, s_)
+        chat = CROSS_ROOMS.get(kind) if kind else None
+        key = f"{inst}|{kind}|{f}-{s_}"
+        if not chat or state.get(key) == ts:
+            continue
+        pl = cross_plan(df, kind, s_)
+        side, entry, sl, tp = pl
+        names = [f"EMA{f}", f"EMA{s_}"]
+        draw(df, f"{coin} {kind} 임박 · EMA{f}×EMA{s_} · {side}진입", "chart.png", names, pl)
+        cap = (f"{kind} 임박 · {coin} · EMA{f}×EMA{s_} → {side}진입\n"
+               f"진입가: {fmt(entry)}\n"
+               f"손절가: {fmt(sl)} ({(sl / entry - 1) * 100:+.2f}%)\n"
+               f"익절가: {fmt(tp)} ({(tp / entry - 1) * 100:+.2f}%)\n"
+               f"거래대금: 평균의 {ratio:.1f}배 (15분봉)")
+        send("chart.png", cap, chat)
+        state[key] = ts
+
+
+def do_align(df, inst, coin, ts, state):
+    if len(df) < 210:
+        return
+    base = df["turn"].iloc[-21:-1].mean()
+    ratio = df["turn"].iloc[-1] / base if base > 0 else 0
+    if ratio < CROSS_SURGE:
+        return
+    res = align_check(df)
+    if not res:
+        return
+    kind, f, s_ = res
+    chat = ALIGN_ROOMS.get(kind)
+    key = f"{inst}|{kind}"
+    if not chat or state.get(key) == ts:
+        return
+    pl = cross_plan(df, "골크" if kind == "정배열" else "데크", s_)
+    side, entry, sl, tp = pl
+    names = [f"EMA{n}" for n in ALIGN]
+    draw(df, f"{coin} {kind} 임박 · {side}진입", "chart.png", names, pl)
+    cap = (f"{kind} 임박 · {coin} · 마지막 남은 EMA{f}×EMA{s_} → {side}진입\n"
+           f"진입가: {fmt(entry)}\n"
+           f"손절가: {fmt(sl)} ({(sl / entry - 1) * 100:+.2f}%)\n"
+           f"익절가: {fmt(tp)} ({(tp / entry - 1) * 100:+.2f}%)\n"
+           f"거래대금: 평균의 {ratio:.1f}배 (15분봉)")
+    send("chart.png", cap, chat)
+    state[key] = ts
+
+
 def main():
     state = json.load(open(STATE)) if os.path.exists(STATE) else {}
     tk = requests.get(BASE + "/api/v5/market/tickers", params={"instType": "SWAP"},
@@ -189,11 +289,13 @@ def main():
             df = add_indicators(get_candles(inst))
             res = check(df)
             time.sleep(0.15)
+            ts = int(df["ts"].iloc[-1])
+            coin = inst.replace("-USDT-SWAP", "")
+            do_cross(df, inst, coin, ts, state)
+            do_align(df, inst, coin, ts, state)
             if not res:
                 continue
-            ts = int(df["ts"].iloc[-1])
             near, ratio = res
-            coin = inst.replace("-USDT-SWAP", "")
             for label in near:
                 key = inst + "|" + label
                 chat = ROOMS.get(label)
@@ -202,7 +304,7 @@ def main():
                 col = [c for l, c, _ in LINES if l == label][0]
                 pl = plan(df, col)
                 side, entry, sl, tp = pl
-                draw(df, f"{coin} {side}진입 · {label} 근처", "chart.png", label, pl)
+                draw(df, f"{coin} {side}진입 · {label} 근처", "chart.png", [label], pl)
                 cap = (f"{side}진입 · {coin} · {label} 근처\n"
                        f"진입가: {fmt(entry)}\n"
                        f"손절가: {fmt(sl)} ({(sl / entry - 1) * 100:+.2f}%)\n"
