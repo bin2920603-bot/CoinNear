@@ -23,6 +23,7 @@ TOP_N = 100      # 거래대금 상위 몇 개 코인을 볼지
 NEAR = 0.005     # 선 근처 = 위아래 0.5%
 SURGE = 2.0      # 거래대금이 직전 20봉 평균의 몇 배 이상이면 알림
 SHOW = 120       # 차트에 보여줄 봉 개수
+RR = 1.5         # 익절 거리 = 손절 거리의 몇 배
 STATE = "state.json"
 
 names = {f.name for f in font_manager.fontManager.ttflist}
@@ -75,7 +76,32 @@ def add_indicators(df):
     df["macd"] = ema(df["c"], 12) - ema(df["c"], 26)
     df["sig"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["hist"] = df["macd"] - df["sig"]
+    pc = df["c"].shift(1)
+    tr = pd.concat([df["h"] - df["l"], (df["h"] - pc).abs(), (df["l"] - pc).abs()], axis=1).max(axis=1)
+    df["atr"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
     return df
+
+
+def plan(df, col):
+    last = df.iloc[-1]
+    entry, line, atr = last["c"], last[col], last["atr"]
+    if entry >= line:
+        side = "롱"
+        sl = min(line, entry) - 0.5 * atr
+        tp = entry + RR * (entry - sl)
+    else:
+        side = "숏"
+        sl = max(line, entry) + 0.5 * atr
+        tp = entry - RR * (sl - entry)
+    return side, entry, sl, tp
+
+
+def fmt(v):
+    if v >= 100:
+        return f"{v:,.2f}"
+    if v >= 1:
+        return f"{v:.4f}"
+    return f"{v:.7f}"
 
 
 LINES = [("EMA7", "ema7", "#d81b60"), ("EMA10", "ema10", "#29b6f6"),
@@ -100,7 +126,7 @@ def check(df):
     return None
 
 
-def draw(df, title, path, only):
+def draw(df, title, path, only, pl):
     d = df.iloc[-SHOW:].reset_index(drop=True)
     x = np.arange(len(d))
     fig, ax = plt.subplots(4, 1, figsize=(9, 11), sharex=True,
@@ -113,8 +139,13 @@ def draw(df, title, path, only):
     for label, c, color in LINES:
         if label == only:
             p.plot(x, d[c], color=color, lw=2.2, label=label)
+    side, entry, sl, tp = pl
+    for v, name, color in ((tp, "익절", "#2e7d32"), (entry, "진입", "#000000"), (sl, "손절", "#c62828")):
+        p.axhline(v, color=color, ls="--", lw=1.2)
+        p.annotate(f" {name} {fmt(v)}", xy=(1.0, v), xycoords=("axes fraction", "data"),
+                   color=color, fontsize=9, va="center", ha="left")
     p.legend(loc="upper left", fontsize=10)
-    p.set_title(title, fontsize=13)
+    p.set_title(title, fontsize=14, color="#2e7d32" if side == "롱" else "#c62828")
     p.grid(alpha=0.25)
     for n, color in ((6, "#8e44ad"), (12, "#1e88e5"), (24, "#fb8c00")):
         ax[1].plot(x, d[f"rsi{n}"], color=color, lw=1, label=f"RSI{n}")
@@ -135,6 +166,7 @@ def draw(df, title, path, only):
     ax[3].set_xticks(ticks)
     ax[3].set_xticklabels([t[i].strftime("%m-%d %H:%M") for i in ticks], fontsize=8)
     fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
     fig.savefig(path, dpi=110)
     plt.close(fig)
 
@@ -167,8 +199,16 @@ def main():
                 chat = ROOMS.get(label)
                 if not chat or state.get(key) == ts:
                     continue
-                draw(df, f"{coin} 15분봉 · {label} 근처", "chart.png", label)
-                send("chart.png", f"{coin} · {label} 근처 · 거래대금 평균의 {ratio:.1f}배 (15분봉)", chat)
+                col = [c for l, c, _ in LINES if l == label][0]
+                pl = plan(df, col)
+                side, entry, sl, tp = pl
+                draw(df, f"{coin} {side}진입 · {label} 근처", "chart.png", label, pl)
+                cap = (f"{side}진입 · {coin} · {label} 근처\n"
+                       f"진입가: {fmt(entry)}\n"
+                       f"손절가: {fmt(sl)} ({(sl / entry - 1) * 100:+.2f}%)\n"
+                       f"익절가: {fmt(tp)} ({(tp / entry - 1) * 100:+.2f}%)\n"
+                       f"거래대금: 평균의 {ratio:.1f}배 (15분봉)")
+                send("chart.png", cap, chat)
                 state[key] = ts
         except Exception as e:
             print(inst, "error:", e)
