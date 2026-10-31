@@ -30,6 +30,7 @@ NEAR = 0.005     # 선 근처 = 위아래 0.5%
 SURGE = 2.0      # 거래대금이 직전 20봉 평균의 몇 배 이상이면 알림
 SHOW = 120       # 차트에 보여줄 봉 개수
 RR = 1.5         # 익절 거리 = 손절 거리의 몇 배
+MIN_TP = 0.008   # 익절이 진입가의 0.8%보다 작으면 알림 안 보냄
 STATE = "state.json"
 
 names = {f.name for f in font_manager.fontManager.ttflist}
@@ -238,6 +239,8 @@ def do_cross(df, inst, coin, ts, state):
             continue
         pl = cross_plan(df, kind, s_)
         side, entry, sl, tp = pl
+        if abs(tp / entry - 1) < MIN_TP:
+            continue
         names = [f"EMA{f}", f"EMA{s_}"]
         draw(df, f"{coin} {kind} 임박 · EMA{f}×EMA{s_} · {side}진입", "chart.png", names, pl)
         cap = (f"{kind} 임박 · {coin} · EMA{f}×EMA{s_} → {side}진입\n"
@@ -266,6 +269,8 @@ def do_align(df, inst, coin, ts, state):
         return
     pl = cross_plan(df, "골크" if kind == "정배열" else "데크", s_)
     side, entry, sl, tp = pl
+    if abs(tp / entry - 1) < MIN_TP:
+        return
     names = [f"EMA{n}" for n in ALIGN]
     draw(df, f"{coin} {kind} 임박 · {side}진입", "chart.png", names, pl)
     cap = (f"{kind} 임박 · {coin} · 마지막 남은 EMA{f}×EMA{s_} → {side}진입\n"
@@ -304,6 +309,8 @@ def main():
                 col = [c for l, c, _ in LINES if l == label][0]
                 pl = plan(df, col)
                 side, entry, sl, tp = pl
+                if abs(tp / entry - 1) < MIN_TP:
+                    continue
                 draw(df, f"{coin} {side}진입 · {label} 근처", "chart.png", [label], pl)
                 cap = (f"{side}진입 · {coin} · {label} 근처\n"
                        f"진입가: {fmt(entry)}\n"
