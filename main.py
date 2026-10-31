@@ -47,6 +47,13 @@ def get_candles(inst):
     return df
 
 
+def num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def ema(s, n):
     return s.ewm(span=n, adjust=False).mean()
 
@@ -66,7 +73,7 @@ def add_indicators(df):
     for n in (6, 12, 24):
         df[f"rsi{n}"] = rsi(df["c"], n)
     df["macd"] = ema(df["c"], 12) - ema(df["c"], 26)
-    df["sig"] = ema(df["macd"], 9) if False else df["macd"].ewm(span=9, adjust=False).mean()
+    df["sig"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["hist"] = df["macd"] - df["sig"]
     return df
 
@@ -137,28 +144,12 @@ def send(path, caption, chat):
                   files={"photo": open(path, "rb")}, timeout=30)
 
 
-def test():
-    rng = np.random.default_rng(1)
-    n = 300
-    c = 100 + np.cumsum(rng.normal(0, 0.4, n))
-    o = np.r_[c[0], c[:-1]]
-    h = np.maximum(o, c) + rng.random(n) * 0.3
-    l = np.minimum(o, c) - rng.random(n) * 0.3
-    turn = rng.random(n) * 1e5 + 5e4
-    turn[-1] = 4e5
-    df = pd.DataFrame({"ts": np.arange(n) * 900000 + 1.7e12, "o": o, "h": h, "l": l,
-                       "c": c, "vol": turn / c, "volc": turn / c, "turn": turn})
-    df = add_indicators(df)
-    print("check:", check(df))
-    draw(df, "TEST 15분봉", "test.png")
-
-
 def main():
     state = json.load(open(STATE)) if os.path.exists(STATE) else {}
     tk = requests.get(BASE + "/api/v5/market/tickers", params={"instType": "SWAP"},
                       timeout=10).json()["data"]
     tk = [t for t in tk if t["instId"].endswith("-USDT-SWAP")]
-    tk.sort(key=lambda t: float(t["volCcy24h"]) * float(t["last"]), reverse=True)
+    tk.sort(key=lambda t: num(t.get("volCcy24h")) * num(t.get("last")), reverse=True)
     for t in tk[:TOP_N]:
         inst = t["instId"]
         try:
@@ -187,4 +178,4 @@ def main():
 
 
 if __name__ == "__main__":
-    test() if "--test" in sys.argv else main()
+    main()
