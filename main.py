@@ -30,7 +30,7 @@ NEAR = 0.005     # 선 근처 = 위아래 0.5%
 SURGE = 2.0      # 거래대금이 직전 20봉 평균의 몇 배 이상이면 알림
 SHOW = 120       # 차트에 보여줄 봉 개수
 RR = 1.5         # 익절 거리 = 손절 거리의 몇 배
-MIN_TP = 0.008   # 익절이 진입가의 0.8%보다 작으면 알림 안 보냄
+MIN_TP = 0.01   # 익절이 진입가의 0.8%보다 작으면 알림 안 보냄
 STATE = "state.json"
 
 names = {f.name for f in font_manager.fontManager.ttflist}
