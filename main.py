@@ -78,10 +78,10 @@ def add_indicators(df):
     return df
 
 
-LINES = [("EMA7", "ema7", "#e91e63"), ("EMA10", "ema10", "#ff7043"),
-         ("EMA20", "ema20", "#f5b400"), ("EMA50", "ema50", "#2e9e44"),
-         ("EMA120", "ema120", "#00acc1"), ("EMA200", "ema200", "#1e5bd8"),
-         ("거가중100", "vwap100", "#8e44ad")]
+LINES = [("EMA7", "ema7", "#d81b60"), ("EMA10", "ema10", "#29b6f6"),
+         ("EMA20", "ema20", "#f9a825"), ("EMA50", "ema50", "#2e7d32"),
+         ("EMA120", "ema120", "#757575"), ("EMA200", "ema200", "#e53935"),
+         ("거가중100", "vwap100", "#6a1b9a")]
 
 
 def check(df):
@@ -100,7 +100,7 @@ def check(df):
     return None
 
 
-def draw(df, title, path):
+def draw(df, title, path, only):
     d = df.iloc[-SHOW:].reset_index(drop=True)
     x = np.arange(len(d))
     fig, ax = plt.subplots(4, 1, figsize=(9, 11), sharex=True,
@@ -111,8 +111,9 @@ def draw(df, title, path):
         p.vlines(i, r["l"], r["h"], color=col, lw=0.8)
         p.bar(i, abs(r["c"] - r["o"]), bottom=min(r["o"], r["c"]), color=col, width=0.7)
     for label, c, color in LINES:
-        p.plot(x, d[c], color=color, lw=1.2, label=label)
-    p.legend(loc="upper left", fontsize=8, ncol=7)
+        if label == only:
+            p.plot(x, d[c], color=color, lw=2.2, label=label)
+    p.legend(loc="upper left", fontsize=10)
     p.set_title(title, fontsize=13)
     p.grid(alpha=0.25)
     for n, color in ((6, "#8e44ad"), (12, "#1e88e5"), (24, "#fb8c00")):
@@ -161,15 +162,12 @@ def main():
             ts = int(df["ts"].iloc[-1])
             near, ratio = res
             coin = inst.replace("-USDT-SWAP", "")
-            drawn = False
             for label in near:
                 key = inst + "|" + label
                 chat = ROOMS.get(label)
                 if not chat or state.get(key) == ts:
                     continue
-                if not drawn:
-                    draw(df, f"{coin} 15분봉 · {label} 근처", "chart.png")
-                    drawn = True
+                draw(df, f"{coin} 15분봉 · {label} 근처", "chart.png", label)
                 send("chart.png", f"{coin} · {label} 근처 · 거래대금 평균의 {ratio:.1f}배 (15분봉)", chat)
                 state[key] = ts
         except Exception as e:
