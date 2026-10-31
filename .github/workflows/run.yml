@@ -43,6 +43,10 @@ jobs:
           CHAT_EMA120: "-5558984787"
           CHAT_EMA200: "-5491460050"
           CHAT_VWAP100: "-5568269082"
+          CHAT_GC: "-5499612307"
+          CHAT_DC: "-5325965861"
+          CHAT_BULL: "-5494593596"
+          CHAT_BEAR: "-5426808665"
         run: python main.py
 
       - name: Save state
