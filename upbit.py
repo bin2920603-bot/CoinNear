@@ -19,7 +19,7 @@ matplotlib.axes.Axes.set_ylabel = lambda self, s, *a, **k: _ylabel(self, s.repla
 m.CHAT = os.environ.get("CHAT_UPBIT")
 
 
-def candles(market, bar):
+def candles(market, bar, live=False):
     rows, to = [], None
     for _ in range(2):                       # 업비트는 한 번에 200개라 두 번 받음
         p = {"market": market, "count": 200}
@@ -32,12 +32,14 @@ def candles(market, bar):
         to = r[-1]["candle_date_time_utc"].replace("T", " ")
         time.sleep(0.12)
     df = pd.DataFrame({
-        "ts": pd.to_datetime([x["candle_date_time_utc"] for x in rows]).astype("int64") // 10**6,
+        "ts": [pd.Timestamp(x["candle_date_time_utc"], tz="UTC").timestamp() * 1000 for x in rows],
         "o": [x["opening_price"] for x in rows], "h": [x["high_price"] for x in rows],
         "l": [x["low_price"] for x in rows], "c": [x["trade_price"] for x in rows],
         "volc": [x["candle_acc_trade_volume"] for x in rows],
         "turn": [x["candle_acc_trade_price"] for x in rows]}).astype(float)
     df = df.drop_duplicates("ts").sort_values("ts").reset_index(drop=True)
+    if live:
+        return df                                # 진행 중인 봉까지 포함
     return df.iloc[:-1].reset_index(drop=True)   # 맨 끝(아직 안 끝난 봉) 버림
 
 
@@ -80,12 +82,15 @@ def main():
     cache = {}
     for market in top:
         coin = market.replace("KRW-", "")
-        dfs = {}
+        dfs, lives = {}, {}
         for bar, _ in m.BARS:
             try:
-                raw = candles(market, bar)
+                full = candles(market, bar, live=True)
+                raw = full.iloc[:-1].reset_index(drop=True)
                 cache[(market, bar)] = raw
                 dfs[bar] = m.add_indicators(raw.copy())
+                if bar in m.LIVE:
+                    lives[bar] = m.add_indicators(full.copy())   # 진행 중인 봉 포함
             except Exception as e:
                 print(market, bar, "error:", e)
         t1d, t4h = m.trend_of(dfs.get("1D")), m.trend_of(dfs.get("4H"))
@@ -93,13 +98,13 @@ def main():
             continue                       # 현물은 둘 다 오를 때만 (롱만)
         want = "롱"
         for bar, bn in m.BARS:
-            df = dfs.get(bar)
+            df = lives.get(bar, dfs.get(bar))   # 4시간·일봉은 진행 중인 봉으로 봄
             if df is None or len(df) < 210:
                 continue
             try:
                 ts = int(df["ts"].iloc[-1])
                 tag = market + "@" + bar
-                ratio = m.surge_ratio(df)
+                ratio = m.surge_ratio(df, m.LIVE.get(bar) if bar in lives else None)
                 d24 = vol24.get(market, 0)
                 sig = m.line_signal(df, want) if ratio >= m.SURGE else None
                 if sig:                          # 튕김이 먼저, 봉 하나에 알림 1개
