@@ -22,6 +22,7 @@ TOUCH = 0.001      # 꼬리가 선의 0.1% 안까지 오면 '닿았다'
 SHOW = 120         # 차트에 보여줄 봉 개수
 RR = 1.5           # 익절 거리 = 손절 거리의 몇 배
 MIN_TP = 0.01      # 익절이 진입가의 1%보다 작으면 알림 안 보냄
+MAX_SL = 0.05      # 손절이 진입가에서 5%보다 멀면 알림 안 보냄
 MAX_WAIT = 96      # 이 봉 수 안에 익절/손절 둘 다 안 닿으면 '시간초과'
 REPORT_HOUR = 9    # 매일 이 시각(한국시간) 이후 첫 실행 때 성적표 보냄
 REPORT_DAYS = 7    # 성적표는 최근 며칠치
@@ -128,14 +129,22 @@ def bounce_check(df, want):
     return hits
 
 
+def limit_sl(pl):
+    """손절이 너무 멀면 익절=진입으로 바꿔서 알림이 안 나가게 함"""
+    side, entry, sl, tp = pl
+    if abs(sl / entry - 1) > MAX_SL:
+        return side, entry, entry, entry
+    return pl
+
+
 def bounce_plan(df, col, side):
     last = df.iloc[-1]
     entry, line, atr = last["c"], last[col], last["atr"]
     if side == "롱":
         sl = min(last["l"], line) - 0.3 * atr
-        return side, entry, sl, entry + RR * (entry - sl)
+        return limit_sl((side, entry, sl, entry + RR * (entry - sl)))
     sl = max(last["h"], line) + 0.3 * atr
-    return side, entry, sl, entry - RR * (sl - entry)
+    return limit_sl((side, entry, sl, entry - RR * (sl - entry)))
 
 
 # ---------------- 골크/데크, 정배열/역배열 ----------------
@@ -171,10 +180,10 @@ def cross_plan(df, kind, s_):
     if kind == "골크":
         sl = min(df["l"].iloc[-5:].min(), slow) - 0.3 * atr
         sl = min(sl, entry - 0.5 * atr)
-        return "롱", entry, sl, entry + RR * (entry - sl)
+        return limit_sl(("롱", entry, sl, entry + RR * (entry - sl)))
     sl = max(df["h"].iloc[-5:].max(), slow) + 0.3 * atr
     sl = max(sl, entry + 0.5 * atr)
-    return "숏", entry, sl, entry - RR * (sl - entry)
+    return limit_sl(("숏", entry, sl, entry - RR * (sl - entry)))
 
 
 def candle_ok(df, side):
