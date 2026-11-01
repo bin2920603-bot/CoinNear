@@ -18,7 +18,11 @@ ROOMS = {
     "거가중100": os.environ.get("CHAT_VWAP100"),
 }
 CROSS_ROOMS = {"골크": os.environ.get("CHAT_GC"), "데크": os.environ.get("CHAT_DC")}
-ALIGN_ROOMS = {"정배열": os.environ.get("CHAT_BULL"), "역배열": os.environ.get("CHAT_BEAR")}
+ALIGN_ROOMS = {"정배열": os.environ.get("CHAT_BULL"), "역배열": os.environ.get("CHAT_BEAR")} 
+_ONE = os.environ.get("CHAT_EMA7")
+ROOMS = {k: _ONE for k in ROOMS}
+CROSS_ROOMS = {k: _ONE for k in CROSS_ROOMS}
+ALIGN_ROOMS = {k: _ONE for k in ALIGN_ROOMS}
 ALIGN = [7, 20, 50, 120, 200]   # 정배열 = 7>20>50>120>200
 PAIRS = [(7, 20), (7, 50), (20, 50), (50, 200)]   # 골크/데크를 볼 이평 짝
 GAP = 0.003      # 두 이평 차이가 가격의 0.3% 안이면 '근접'
