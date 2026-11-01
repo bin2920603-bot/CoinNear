@@ -232,7 +232,7 @@ def draw(df, title, path, only, pl):
     ax[2].legend(loc="upper left", fontsize=7, ncol=2)
     ax[2].grid(alpha=0.25)
     ax[3].bar(x, d["turn"], color=np.where(d["c"] >= d["o"], "#2e9e44", "#d62728"), width=0.7)
-    ax[3].set_ylabel("거래대금(USDT)", fontsize=8)
+    ax[3].set_ylabel("거래대금($)", fontsize=8)
     ax[3].grid(alpha=0.25)
     ticks = list(range(0, len(d), 20))
     t = pd.to_datetime(d["ts"], unit="ms") + pd.Timedelta(hours=9)
@@ -267,8 +267,8 @@ def alert(df, state, key, ts, pl, kind, coin, inst, bar, title, head, lines, rat
            f"익절가: {fmt(tp)} ({(tp / entry - 1) * 100:+.2f}%)\n"
            f"큰 흐름: 일봉{arrow(t1d)} · 4시간{arrow(t4h)}\n"
            f"거래대금: 평균의 {ratio:.1f}배 ({BAR_NAME[bar]})\n"
-           f"봉 거래대금: {um(df['turn'].iloc[-1])} USDT\n"
-           f"24시간 거래대금: {um(d24)} USDT")
+           f"봉 거래대금: ${um(df['turn'].iloc[-1])}\n"
+           f"24시간 거래대금: ${um(d24)}")
     send("chart.png", cap)
     state[key] = ts
     state.setdefault("open", []).append({
