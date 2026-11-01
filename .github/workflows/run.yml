@@ -33,11 +33,25 @@ jobs:
           key: state-${{ github.run_id }}
           restore-keys: state-
 
+      - name: Restore upbit state
+        uses: actions/cache/restore@v4
+        with:
+          path: upbit_state.json
+          key: upbit-state-${{ github.run_id }}
+          restore-keys: upbit-state-
+
       - name: Run
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           CHAT_EMA7: "6667903479"
         run: python main.py
+
+      - name: Run upbit
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_UPBIT: ${{ secrets.CHAT_UPBIT }}
+        run: python upbit.py
 
       - name: Save state
         if: always()
@@ -45,3 +59,10 @@ jobs:
         with:
           path: state.json
           key: state-${{ github.run_id }}
+
+      - name: Save upbit state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: upbit_state.json
+          key: upbit-state-${{ github.run_id }}
