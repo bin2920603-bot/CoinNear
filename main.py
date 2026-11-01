@@ -342,5 +342,5 @@ def draw(df, *a, **k):
 def send(path, caption, chat):
     krw = _last.get("turn", 0) * 1450 / 1e8
     return _send(path, caption + f"\n총 거래대금: {krw:,.0f}억원", chat)
-if  == "__main__":
+if __name__ == "__main__":
     main()
