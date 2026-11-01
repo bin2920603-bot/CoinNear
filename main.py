@@ -42,6 +42,7 @@ LINES = [("EMA7", "ema7", "#d81b60"), ("EMA10", "ema10", "#29b6f6"),
          ("EMA120", "ema120", "#757575"), ("EMA200", "ema200", "#e53935"),
          ("거가중100", "vwap100", "#6a1b9a")]
 BAR_NAME = dict(BARS)
+LIVE = {"1D": 86400000, "4H": 14400000}   # 이 봉들은 끝나기 전에도 5분마다 봄(봉 길이 ms)
 
 
 # ---------------- 데이터 ----------------
@@ -52,7 +53,7 @@ def num(x):
         return 0.0
 
 
-def get_candles(inst, bar):
+def get_candles(inst, bar, live=False):
     r = requests.get(BASE + "/api/v5/market/candles",
                      params={"instId": inst, "bar": bar, "limit": 300},
                      timeout=10).json()["data"]
@@ -60,7 +61,9 @@ def get_candles(inst, bar):
     df.columns = ["ts", "o", "h", "l", "c", "vol", "volc", "turn", "confirm"]
     for k in df.columns:
         df[k] = df[k].astype(float)
-    df = df[df["confirm"] == 1].sort_values("ts").reset_index(drop=True)
+    df = df.sort_values("ts").reset_index(drop=True)
+    if not live:
+        df = df[df["confirm"] == 1].reset_index(drop=True)
     if df["turn"].sum() == 0:
         df["turn"] = df["volc"] * df["c"]
     return df
@@ -93,9 +96,15 @@ def add_indicators(df):
     return df
 
 
-def surge_ratio(df):
+def surge_ratio(df, period=None):
+    """마지막 봉 거래대금이 직전 20봉 평균의 몇 배인지.
+    아직 안 끝난 봉(period 있음)은 지금 속도로 봉 끝까지 갔을 때 거래대금으로 계산"""
     base = df["turn"].iloc[-21:-1].mean()
-    return df["turn"].iloc[-1] / base if base > 0 else 0
+    turn = df["turn"].iloc[-1]
+    if period:
+        frac = (time.time() * 1000 - df["ts"].iloc[-1]) / period
+        turn = turn / min(max(frac, 0.25), 1)
+    return turn / base if base > 0 else 0
 
 
 # ---------------- 1. 큰 흐름(추세) ----------------
@@ -412,12 +421,15 @@ def main():
     for t in tk[:TOP_N]:
         inst = t["instId"]
         coin = inst.replace("-USDT-SWAP", "")
-        dfs = {}
+        dfs, lives = {}, {}
         for bar, _ in BARS:
             try:
-                raw = get_candles(inst, bar)
+                full = get_candles(inst, bar, live=True)
+                raw = full[full["confirm"] == 1].reset_index(drop=True)
                 cache[(inst, bar)] = raw
                 dfs[bar] = add_indicators(raw.copy())
+                if bar in LIVE and full["confirm"].iloc[-1] == 0:
+                    lives[bar] = add_indicators(full.copy())   # 진행 중인 봉 포함
             except Exception as e:
                 print(inst, bar, "error:", e)
             time.sleep(0.15)
@@ -426,13 +438,13 @@ def main():
             continue                     # 큰 흐름이 엇갈리면 이 코인은 안 봄
         want = "롱" if t1d == "up" else "숏"
         for bar, bn in BARS:
-            df = dfs.get(bar)
+            df = lives.get(bar, dfs.get(bar))   # 4시간·일봉은 진행 중인 봉으로 봄
             if df is None or len(df) < 210:
                 continue
             try:
                 ts = int(df["ts"].iloc[-1])
                 tag = inst + "@" + bar
-                ratio = surge_ratio(df)
+                ratio = surge_ratio(df, LIVE.get(bar) if bar in lives else None)
                 d24 = vol24.get(inst, 0)
                 # 선 튕김 / 선 근처 (튕김이 먼저, 봉 하나에 알림 1개)
                 sig = line_signal(df, want) if ratio >= SURGE else None
