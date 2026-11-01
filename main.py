@@ -314,6 +314,21 @@ def main():
                 print(inst, bar, "error:", e)
     json.dump(state, open(STATE, "w"))
 
+_plan, _cross_plan = plan, cross_plan
 
+
+def _bad(df, side):
+    last = df.iloc[-1]
+    return (side == "롱" and last["c"] < last["o"]) or (side == "숏" and last["c"] > last["o"])
+
+
+def plan(df, col):
+    pl = _plan(df, col)
+    return (pl[0], pl[1], pl[1], pl[1]) if _bad(df, pl[0]) else pl
+
+
+def cross_plan(df, kind, s_):
+    pl = _cross_plan(df, kind, s_)
+    return (pl[0], pl[1], pl[1], pl[1]) if _bad(df, pl[0]) else pl
 if __name__ == "__main__":
     main()
