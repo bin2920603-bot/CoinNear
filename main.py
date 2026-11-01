@@ -17,8 +17,9 @@ ALIGN = [7, 20, 50, 120, 200]                  # 정배열 = 7>20>50>120>200
 PAIRS = [(7, 20), (7, 50), (20, 50), (50, 200)]  # 골크/데크를 볼 이평 짝
 GAP = 0.003        # 두 이평 차이가 가격의 0.3% 안이면 '근접'
 CROSS_SURGE = 1.5  # 골크/데크/배열 알림: 거래대금 평균의 1.5배 이상
-SURGE = 2.0        # 선 튕김 알림: 거래대금 평균의 2배 이상
-TOUCH = 0.001      # 꼬리가 선의 0.1% 안까지 오면 '닿았다'
+SURGE = 2.0        # 선 근처 알림: 거래대금 평균의 2배 이상
+NEAR = 0.005       # 선 근처 = 위아래 0.5%
+TOUCH = 0.001      # 꼬리가 선의 0.1% 안까지 오면 '닿았다'(튕김)
 SHOW = 120         # 차트에 보여줄 봉 개수
 RR = 1.5           # 익절 거리 = 손절 거리의 몇 배
 MIN_TP = 0.01      # 익절이 진입가의 1%보다 작으면 알림 안 보냄
@@ -113,20 +114,47 @@ def arrow(t):
     return {"up": "↑", "down": "↓"}.get(t, "↔")
 
 
-# ---------------- 2. 선에서 튕겼나 ----------------
-def bounce_check(df, want):
-    """마감된 마지막 봉이 선을 꼬리로 찍고 반대편에서 마감했는지"""
+# ---------------- 2. 선 근처 (위·아래 둘 다) ----------------
+def near_check(df, want):
+    """마감된 마지막 봉의 종가가 선 위아래 0.5% 안에 있고, 봉 색이 방향과 맞는지"""
     last = df.iloc[-1]
+    if not candle_ok(df, want):
+        return []
+    hits = []
+    for label, col, _ in LINES:
+        v = last[col]
+        if pd.notna(v) and v > 0 and abs(last["c"] - v) / v <= NEAR:
+            hits.append((label, col))
+    return hits
+
+
+def bounce_check(df, want):
+    """마감된 마지막 봉이 꼬리로 선을 찍고 반대편에서 마감했는지"""
+    last = df.iloc[-1]
+    if not candle_ok(df, want):
+        return []
     hits = []
     for label, col, _ in LINES:
         v = last[col]
         if pd.isna(v) or v <= 0:
             continue
-        if want == "롱" and last["l"] <= v * (1 + TOUCH) and last["c"] > v and last["c"] > last["o"]:
+        if want == "롱" and last["l"] <= v * (1 + TOUCH) and last["c"] > v:
             hits.append((label, col))
-        if want == "숏" and last["h"] >= v * (1 - TOUCH) and last["c"] < v and last["c"] < last["o"]:
+        if want == "숏" and last["h"] >= v * (1 - TOUCH) and last["c"] < v:
             hits.append((label, col))
     return hits
+
+
+def line_signal(df, want):
+    """튕김이 있으면 튕김, 없으면 근처. 둘 다 없으면 None"""
+    last = df.iloc[-1]
+    hits, kind = bounce_check(df, want), "튕김"
+    if not hits:
+        hits, kind = near_check(df, want), "근처"
+    if not hits:
+        return None
+    label, col = min(hits, key=lambda h: abs(last[h[1]] - last["c"]))
+    return kind, label, col, " · ".join(h[0] for h in hits), [h[0] for h in hits]
 
 
 def limit_sl(pl):
@@ -137,7 +165,7 @@ def limit_sl(pl):
     return pl
 
 
-def bounce_plan(df, col, side):
+def near_plan(df, col, side):
     last = df.iloc[-1]
     entry, line, atr = last["c"], last[col], last["atr"]
     if side == "롱":
@@ -406,18 +434,15 @@ def main():
                 tag = inst + "@" + bar
                 ratio = surge_ratio(df)
                 d24 = vol24.get(inst, 0)
-                # 선 튕김
-                hits = bounce_check(df, want) if ratio >= SURGE else []
-                if hits:                 # 선 여러 개를 동시에 찍어도 알림은 1개
-                    last = df.iloc[-1]
-                    tip = last["l"] if want == "롱" else last["h"]
-                    label, col = min(hits, key=lambda h: abs(last[h[1]] - tip))
-                    both = " · ".join(h[0] for h in hits)
-                    pl = bounce_plan(df, col, want)
-                    alert(df, state, f"{tag}|튕김", ts, pl, label, coin, inst, bar,
-                          f"[{bn}] {coin} {want}진입 · {both} 튕김",
-                          f"[{bn}] {want}진입 · {coin} · {both} 튕김",
-                          [h[0] for h in hits], ratio, t1d, t4h, d24)
+                # 선 튕김 / 선 근처 (튕김이 먼저, 봉 하나에 알림 1개)
+                sig = line_signal(df, want) if ratio >= SURGE else None
+                if sig:
+                    kind, label, col, both, names_ = sig
+                    pl = near_plan(df, col, want)
+                    alert(df, state, f"{tag}|선", ts, pl, f"{label} {kind}", coin, inst, bar,
+                          f"[{bn}] {coin} {want}진입 · {both} {kind}",
+                          f"[{bn}] {want}진입 · {coin} · {both} {kind}",
+                          names_, ratio, t1d, t4h, d24)
                 if ratio < CROSS_SURGE:
                     continue
                 # 골크/데크
