@@ -342,5 +342,34 @@ def draw(df, *a, **k):
 def send(path, caption, chat):
     krw = _last.get("turn", 0) * 1450 / 1e8
     return _send(path, caption + f"\n총 거래대금: {krw:,.0f}억원", chat)
+    _get_candles = get_candles
+_tick = {}
+
+
+def _um(v):
+    if v >= 1e8:
+        return f"{v / 1e8:,.1f}억"
+    if v >= 1e4:
+        return f"{v / 1e4:,.1f}만"
+    return f"{v:,.0f}"
+
+
+def get_candles(inst, bar):
+    _last["inst"] = inst
+    return _get_candles(inst, bar)
+
+
+def send(path, caption, chat):
+    d24 = 0
+    try:
+        if not _tick:
+            r = requests.get(BASE + "/api/v5/market/tickers", params={"instType": "SWAP"}, timeout=10).json()["data"]
+            for t in r:
+                _tick[t["instId"]] = num(t.get("volCcy24h")) * num(t.get("last"))
+        d24 = _tick.get(_last.get("inst"), 0)
+    except Exception:
+        pass
+    bar_v = _last.get("turn", 0)
+    return _send(path, caption + f"\n봉 거래대금: {_um(bar_v)} USDT\n24시간 거래대금: {_um(d24)} USDT", chat)
 if __name__ == "__main__":
     main()
