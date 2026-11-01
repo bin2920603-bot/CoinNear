@@ -101,16 +101,14 @@ def main():
                 tag = market + "@" + bar
                 ratio = m.surge_ratio(df)
                 d24 = vol24.get(market, 0)
-                hits = m.bounce_check(df, want) if ratio >= m.SURGE else []
-                if hits:
-                    last = df.iloc[-1]
-                    label, col = min(hits, key=lambda h: abs(last[h[1]] - last["l"]))
-                    both = " · ".join(h[0] for h in hits)
-                    pl = m.bounce_plan(df, col, want)
-                    alert(df, state, f"{tag}|튕김", ts, pl, label, coin, market, bar,
-                          f"[{bn}] {coin} 매수 · {both} 튕김",
-                          f"[{bn}] 매수 · {coin} · {both} 튕김",
-                          [h[0] for h in hits], ratio, t1d, t4h, d24)
+                sig = m.line_signal(df, want) if ratio >= m.SURGE else None
+                if sig:                          # 튕김이 먼저, 봉 하나에 알림 1개
+                    kind, label, col, both, names_ = sig
+                    pl = m.near_plan(df, col, want)
+                    alert(df, state, f"{tag}|선", ts, pl, f"{label} {kind}", coin, market, bar,
+                          f"[{bn}] {coin} 매수 · {both} {kind}",
+                          f"[{bn}] 매수 · {coin} · {both} {kind}",
+                          names_, ratio, t1d, t4h, d24)
                 if ratio < m.CROSS_SURGE or not m.candle_ok(df, want):
                     continue
                 for f, s_ in m.PAIRS:
