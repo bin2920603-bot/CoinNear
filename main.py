@@ -330,5 +330,17 @@ def plan(df, col):
 def cross_plan(df, kind, s_):
     pl = _cross_plan(df, kind, s_)
     return (pl[0], pl[1], pl[1], pl[1]) if _bad(df, pl[0]) else pl
-if __name__ == "__main__":
+_draw, _send = draw, send
+_last = {}
+
+
+def draw(df, *a, **k):
+    _last["turn"] = df["turn"].iloc[-1]
+    return _draw(df, *a, **k)
+
+
+def send(path, caption, chat):
+    krw = _last.get("turn", 0) * 1450 / 1e8
+    return _send(path, caption + f"\n총 거래대금: {krw:,.0f}억원", chat)
+if  == "__main__":
     main()
