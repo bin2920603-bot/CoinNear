@@ -1,4 +1,5 @@
 import os, json, time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 import requests
 import numpy as np
@@ -34,6 +35,7 @@ FUND_SHORT = -0.0002 # 펀딩비가 -0.02% 이하(숏이 너무 몰림)면 숏 �
 WALL_FRAC = 0.5      # 진입~익절 거리의 절반 안에 큰 선(벽)이 있으면 대기로 보냄
 WAIT_HOURS = 8       # 벽 때문에 대기 중인 코인은 몇 시간까지 기다릴지
 COOLDOWN_MIN = 60    # 같은 코인·같은 방향은 이 시간(분) 안에 한 번만 알림(겹치면 한 알림에 합침)
+WORKERS = 4          # 코인 봉 데이터를 동시에 몇 개씩 받을지(속도용. OKX 요청 제한 때문에 너무 크게 하지 않음)
 STATE = "state.json"
 KST = timezone(timedelta(hours=9))
 
@@ -62,9 +64,14 @@ def num(x):
 
 
 def get_candles(inst, bar, live=False):
-    r = requests.get(BASE + "/api/v5/market/candles",
-                     params={"instId": inst, "bar": bar, "limit": 300},
-                     timeout=10).json()["data"]
+    r = []
+    for _ in range(3):                    # 요청이 몰려 빈 답이 오면 잠깐 쉬고 다시 시도
+        r = requests.get(BASE + "/api/v5/market/candles",
+                         params={"instId": inst, "bar": bar, "limit": 300},
+                         timeout=10).json()["data"]
+        if r:
+            break
+        time.sleep(0.6)
     df = pd.DataFrame(r).iloc[:, :9]
     df.columns = ["ts", "o", "h", "l", "c", "vol", "volc", "turn", "confirm"]
     for k in df.columns:
@@ -532,6 +539,23 @@ def daily_report(state):
 
 
 # ---------------- 실행 ----------------
+def fetch_coin(inst):
+    """한 코인의 봉 4종을 받아서 (마감봉 원본, 지표 붙인 마감봉, 진행 중 포함 봉)으로 돌려줌"""
+    raws, dfs, lives = {}, {}, {}
+    for bar, _ in BARS:
+        try:
+            full = get_candles(inst, bar, live=True)
+            raw = full[full["confirm"] == 1].reset_index(drop=True)
+            raws[bar] = raw
+            dfs[bar] = add_indicators(raw.copy())
+            if bar in LIVE and full["confirm"].iloc[-1] == 0:
+                lives[bar] = add_indicators(full.copy())   # 진행 중인 봉 포함
+        except Exception as e:
+            print(inst, bar, "error:", e)
+        time.sleep(0.15)
+    return raws, dfs, lives
+
+
 def main():
     state = json.load(open(STATE)) if os.path.exists(STATE) else {}
     now_ms = int(time.time() * 1000)
@@ -553,21 +577,13 @@ def main():
         chg[t["instId"]] = num(t.get("last")) / o - 1 if o > 0 else 0
     tk.sort(key=lambda t: vol24[t["instId"]], reverse=True)
     cache = {}
-    for t in tk[:TOP_N]:
-        inst = t["instId"]
+    top = [t["instId"] for t in tk[:TOP_N]]
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:     # 봉 받기만 동시에 함(속도용)
+        fetched = list(ex.map(fetch_coin, top))
+    for inst, (raws, dfs, lives) in zip(top, fetched):
         coin = inst.replace("-USDT-SWAP", "")
-        dfs, lives = {}, {}
-        for bar, _ in BARS:
-            try:
-                full = get_candles(inst, bar, live=True)
-                raw = full[full["confirm"] == 1].reset_index(drop=True)
-                cache[(inst, bar)] = raw
-                dfs[bar] = add_indicators(raw.copy())
-                if bar in LIVE and full["confirm"].iloc[-1] == 0:
-                    lives[bar] = add_indicators(full.copy())   # 진행 중인 봉 포함
-            except Exception as e:
-                print(inst, bar, "error:", e)
-            time.sleep(0.15)
+        for bar, raw in raws.items():
+            cache[(inst, bar)] = raw
         t1d, t4h = trend_of(dfs.get("1D")), trend_of(dfs.get("4H"))
         if t1d is None or t1d != t4h:
             continue                     # 큰 흐름이 엇갈리면 이 코인은 안 봄
