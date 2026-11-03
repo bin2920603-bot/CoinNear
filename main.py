@@ -380,6 +380,71 @@ def draw(df, title, path, only, pl):
     plt.close(fig)
 
 
+CACHE = {}   # 코인·봉별 마감봉 원본 (카드 그릴 때 다른 봉을 꺼내 씀)
+
+
+def draw_card(dfs, sig, title, pl, primary, path):
+    """일봉·4시간·1시간·15분을 한 장(2x2)에 그림. 신호난 선은 굵게, 진입·손절·익절은 신호난 봉 칸에만."""
+    from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+    side, entry, sl, tp = pl
+    fig = plt.figure(figsize=(14, 15), dpi=80)
+    outer = GridSpec(2, 2, figure=fig, wspace=0.14, hspace=0.12, top=0.94, bottom=0.03, left=0.06, right=0.97)
+    fig.suptitle(title, fontsize=15, x=0.06, ha="left", color="#2e7d32" if side == "롱" else "#c62828")
+    for k, (bar, bn) in enumerate(BARS):
+        gs = GridSpecFromSubplotSpec(4, 1, subplot_spec=outer[k // 2, k % 2],
+                                     height_ratios=[4, 1.2, 1.2, 1.2], hspace=0.08)
+        axp = fig.add_subplot(gs[0])
+        axr = fig.add_subplot(gs[1], sharex=axp)
+        axm = fig.add_subplot(gs[2], sharex=axp)
+        axv = fig.add_subplot(gs[3], sharex=axp)
+        df = dfs.get(bar)
+        if df is None or len(df) < 30:
+            axp.set_title(f"{bn} (데이터 없음)", fontsize=11, loc="left")
+            continue
+        d = df.iloc[-80:].reset_index(drop=True)
+        x = np.arange(len(d))
+        col = np.where((d["c"] >= d["o"]).values, "#2e9e44", "#d62728")
+        axp.vlines(x, d["l"], d["h"], colors=col, linewidth=0.8)
+        axp.bar(x, d["c"] - d["o"], bottom=d["o"], color=col, width=0.7)
+        names = sig.get(bar, [])
+        for label, c, color in LINES:
+            if label in names:
+                axp.plot(x, d[c], color=color, lw=2.2, label=label)
+            else:
+                axp.plot(x, d[c], color=color, lw=0.7, alpha=0.5)
+        mark = "  ★ " + "+".join(names) if names else ""
+        axp.set_title(f"{bn} ({bar}){mark}", fontsize=11, loc="left", fontweight="bold" if names else "normal")
+        if names:
+            axp.legend(loc="upper left", fontsize=8)
+        if bar == primary:
+            for v, name, color in ((tp, "TP", "#2e7d32"), (entry, "IN", "#000000"), (sl, "SL", "#c62828")):
+                axp.axhline(v, color=color, ls="--", lw=1)
+                axp.annotate(f" {name} {fmt(v)}", xy=(1.0, v), xycoords=("axes fraction", "data"),
+                             color=color, fontsize=7, va="center", ha="left")
+        for n, color in ((6, "#8e44ad"), (12, "#1e88e5"), (24, "#fb8c00")):
+            axr.plot(x, d[f"rsi{n}"], color=color, lw=0.8)
+        axr.axhline(70, color="gray", ls="--", lw=0.5)
+        axr.axhline(30, color="gray", ls="--", lw=0.5)
+        axr.set_ylim(0, 100)
+        axr.set_yticks([30, 70])
+        axm.bar(x, d["hist"], color=np.where(d["hist"] >= 0, "#2e9e44", "#d62728"), width=0.7)
+        axm.plot(x, d["macd"], color="#1e88e5", lw=0.8)
+        axm.plot(x, d["sig"], color="#fb8c00", lw=0.8)
+        axv.bar(x, d["turn"], color=col, width=0.7)
+        for ax, lab in ((axr, "RSI"), (axm, "MACD"), (axv, "VOL")):
+            ax.set_ylabel(lab, fontsize=7)
+            ax.tick_params(labelsize=7)
+        axp.tick_params(labelsize=8)
+        axv.set_yticks([])
+        for ax in (axp, axr, axm):
+            plt.setp(ax.get_xticklabels(), visible=False)
+        axv.set_xticks([])
+        for ax in (axp, axr, axm, axv):
+            ax.grid(alpha=0.25)
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def send(path, caption):
     if not TOKEN or not CHAT:
         return
@@ -398,7 +463,25 @@ def emit(state, inst, cands, t1d, t4h, d24, btc):
     cands.sort(key=lambda c: order[c["bar"]])
     p = cands[0]
     side, entry, sl, tp = p["pl"]
-    draw(p["df"], p["title"], "chart.png", p["lines"], p["pl"])
+    dfs, sig = {}, {}
+    for c in cands:
+        dfs.setdefault(c["bar"], c["df"])
+        sig.setdefault(c["bar"], [])
+        for nm in c["lines"]:
+            if nm not in sig[c["bar"]]:
+                sig[c["bar"]].append(nm)
+    for b2, _ in BARS:
+        if b2 in dfs:
+            continue
+        try:
+            raw = CACHE.get((inst, b2))
+            if raw is None:
+                raw = get_candles(inst, b2)
+                time.sleep(0.15)
+            dfs[b2] = add_indicators(raw.copy())
+        except Exception as e:
+            print(inst, b2, "card error:", e)
+    draw_card(dfs, sig, p["title"], p["pl"], p["bar"], "chart.png")
     extra = ""
     if len(cands) > 1:
         listed = " / ".join(f"{BAR_NAME[c['bar']]} {c['kind']}" for c in cands[:6])
@@ -593,7 +676,7 @@ def main():
         o = num(t.get("open24h"))
         chg[t["instId"]] = num(t.get("last")) / o - 1 if o > 0 else 0
     tk.sort(key=lambda t: vol24[t["instId"]], reverse=True)
-    cache = {}
+    cache = CACHE
     top = [t["instId"] for t in tk[:TOP_N]]
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:     # 봉 받기만 동시에 함(속도용)
         fetched = list(ex.map(fetch_coin, top))
