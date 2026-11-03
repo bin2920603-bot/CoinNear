@@ -36,6 +36,9 @@ WALL_FRAC = 0.5      # 진입~익절 거리의 절반 안에 큰 선(벽)이 있
 WAIT_HOURS = 8       # 벽 때문에 대기 중인 코인은 몇 시간까지 기다릴지
 COOLDOWN_MIN = 60    # 같은 코인·같은 방향은 이 시간(분) 안에 한 번만 알림(겹치면 한 알림에 합침)
 WORKERS = 4          # 코인 봉 데이터를 동시에 몇 개씩 받을지(속도용. OKX 요청 제한 때문에 너무 크게 하지 않음)
+SLOPE_BARS = 5       # 선의 방향을 볼 봉 개수
+SLOPE_ATR = 0.3      # 그 사이 선이 ATR의 0.3배 이상 움직여야 '방향 있음'
+SLOPE_LINES = ("EMA10", "거가중100")   # 방향을 확인할 선 (승률이 낮았던 것)
 STATE = "state.json"
 KST = timezone(timedelta(hours=9))
 
@@ -154,6 +157,17 @@ def market_ok(side, btc):
 
 
 # ---------------- 2. 선 근처 (위·아래 둘 다) ----------------
+def line_dir_ok(df, col, want):
+    """선이 진입 방향으로 기울어 있는지 (롱=오르는 선, 숏=내리는 선)"""
+    if len(df) <= SLOPE_BARS:
+        return False
+    now, before, atr = df[col].iloc[-1], df[col].iloc[-1 - SLOPE_BARS], df["atr"].iloc[-1]
+    if pd.isna(now) or pd.isna(before) or pd.isna(atr):
+        return False
+    move = now - before
+    return move >= SLOPE_ATR * atr if want == "롱" else move <= -SLOPE_ATR * atr
+
+
 def near_check(df, want):
     """마감된 마지막 봉의 종가가 선 위아래 0.5% 안에 있고, 봉 색이 방향과 맞는지"""
     last = df.iloc[-1]
@@ -162,7 +176,8 @@ def near_check(df, want):
     hits = []
     for label, col, _ in LINES:
         v = last[col]
-        if pd.notna(v) and v > 0 and abs(last["c"] - v) / v <= NEAR:
+        if (pd.notna(v) and v > 0 and abs(last["c"] - v) / v <= NEAR
+                and (label not in SLOPE_LINES or line_dir_ok(df, col, want))):
             hits.append((label, col))
     return hits
 
@@ -176,6 +191,8 @@ def bounce_check(df, want):
     for label, col, _ in LINES:
         v = last[col]
         if pd.isna(v) or v <= 0:
+            continue
+        if label in SLOPE_LINES and not line_dir_ok(df, col, want):
             continue
         if want == "롱" and last["l"] <= v * (1 + TOUCH) and last["c"] > v:
             hits.append((label, col))
@@ -621,6 +638,8 @@ def main():
                     kind = cross_check(df, f, s_)
                     if not kind or (kind == "골크") != (want == "롱") or not candle_ok(df, want):
                         continue
+                    if kind == "골크" and not line_dir_ok(df, f"ema{s_}", want):
+                        continue                 # 골크는 느린 선이 오르는 중일 때만
                     pl = cross_plan(df, kind, s_)
                     queue(cands, state, inst,
                           {"key": f"{tag}|{kind}|{f}-{s_}", "ts": ts, "bar": bar, "kind": kind,
