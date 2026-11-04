@@ -39,8 +39,10 @@ WORKERS = 4          # 코인 봉 데이터를 동시에 몇 개씩 받을지(�
 SLOPE_BARS = 5       # 선의 방향을 볼 봉 개수
 SLOPE_ATR = 0.3      # 그 사이 선이 ATR의 0.3배 이상 움직여야 '방향 있음'
 SLOPE_LINES = ("EMA10", "거가중100")   # 방향을 확인할 선 (승률이 낮았던 것)
-TREND_K = 3          # 추세선 고점/저점 판단: 좌우 몇 봉보다 높아야(낮아야) 고점(저점)으로 볼지
-TREND_TOL = 0.003    # 추세선을 가격이 이 비율(0.3%)까지는 넘어도 괜찮다고 봄
+TREND_K = 2          # 추세선 고점/저점 판단: 좌우 몇 봉보다 높아야(낮아야) 고점(저점)으로 볼지
+TREND_TOL = 0.03     # 추세선 여유: 차트 높이(고점-저점)의 3%까지는 꼬리가 선을 넘어도 봐줌
+TREND_BAD = 1        # 선을 넘은 봉이 이 개수 이하면 인정
+TREND_MIN_GAP = 8    # 선을 긋는 두 점 사이가 최소 몇 봉 이상 떨어져야 하는지
 TREND_COLOR = "#FFC107"   # 추세선 색 (노란색)
 STATE = "state.json"
 KST = timezone(timedelta(hours=9))
@@ -399,36 +401,42 @@ def find_swings(vals, k, high=True):
 
 def find_trendline(d, kind):
     """kind='down': 고점들을 이은 하락 추세선, kind='up': 저점들을 이은 상승 추세선.
-    선이 지나온 구간에서 가격이 선을 뚫지 않은 것만 인정. 못 찾으면 None.
+    꼬리가 선을 살짝 넘는 건 봐주고(차트 높이의 TREND_TOL), 넘은 봉이 TREND_BAD개 이하인 선 중
+    가장 길게 이어진 선을 고름. 못 찾으면 None.
     돌려주는 값: (시작 위치, 시작 가격, 끝 위치, 끝 가격)"""
     n = len(d)
+    highs = list(d["h"].values)
+    lows = list(d["l"].values)
+    tol = TREND_TOL * (max(highs) - min(lows))
     if kind == "down":
-        vals = list(d["h"].values)
+        vals = highs
         swings = find_swings(vals, TREND_K, True)
     else:
-        vals = list(d["l"].values)
+        vals = lows
         swings = find_swings(vals, TREND_K, False)
-    for b in reversed(swings[-3:]):      # 최근 고점(저점) 3개 중에서 뒤쪽 점 고르기
-        for a in swings:                 # 앞쪽 점은 오래된 것부터 (선이 길수록 좋음)
-            if b - a < 5:
+    best = None
+    for b in swings[-4:]:                # 최근 고점(저점) 4개를 뒤쪽 점 후보로
+        for a in swings:                 # 앞쪽 점은 오래된 것부터
+            if b - a < TREND_MIN_GAP:
                 break
             if kind == "down" and vals[a] <= vals[b]:
                 continue
             if kind == "up" and vals[a] >= vals[b]:
                 continue
             slope = (vals[b] - vals[a]) / (b - a)
-            ok = True
-            for x in range(a, n - 1):    # 마지막(진행 중) 봉은 제외하고 선을 뚫었는지 확인
+            bad = 0
+            for x in range(a, n - 1):    # 마지막(진행 중) 봉은 제외하고 선을 넘은 봉을 셈
                 line = vals[a] + slope * (x - a)
-                if kind == "down" and vals[x] > line * (1 + TREND_TOL):
-                    ok = False
-                    break
-                if kind == "up" and vals[x] < line * (1 - TREND_TOL):
-                    ok = False
-                    break
-            if ok:
-                return a, vals[a], n - 1, vals[a] + slope * (n - 1 - a)
-    return None
+                if kind == "down" and vals[x] > line + tol:
+                    bad += 1
+                if kind == "up" and vals[x] < line - tol:
+                    bad += 1
+            if bad > TREND_BAD:
+                continue
+            span = b - a
+            if best is None or span > best[0]:
+                best = (span, a, vals[a], n - 1, vals[a] + slope * (n - 1 - a))
+    return best[1:] if best else None
 
 
 def draw_trendlines(ax, d):
@@ -438,7 +446,7 @@ def draw_trendlines(ax, d):
         t = find_trendline(d, kind)
         if t:
             x0, y0, x1, y1 = t
-            ax.plot([x0, x1], [y0, y1], color=TREND_COLOR, linewidth=2.4,
+            ax.plot([x0, x1], [y0, y1], color=TREND_COLOR, linewidth=3.0,
                     label="추세선" if first else None)
             first = False
 
