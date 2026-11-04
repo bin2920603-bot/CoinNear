@@ -39,6 +39,9 @@ WORKERS = 4          # 코인 봉 데이터를 동시에 몇 개씩 받을지(�
 SLOPE_BARS = 5       # 선의 방향을 볼 봉 개수
 SLOPE_ATR = 0.3      # 그 사이 선이 ATR의 0.3배 이상 움직여야 '방향 있음'
 SLOPE_LINES = ("EMA10", "거가중100")   # 방향을 확인할 선 (승률이 낮았던 것)
+TREND_K = 3          # 추세선 고점/저점 판단: 좌우 몇 봉보다 높아야(낮아야) 고점(저점)으로 볼지
+TREND_TOL = 0.003    # 추세선을 가격이 이 비율(0.3%)까지는 넘어도 괜찮다고 봄
+TREND_COLOR = "#FFC107"   # 추세선 색 (노란색)
 STATE = "state.json"
 KST = timezone(timedelta(hours=9))
 
@@ -383,6 +386,63 @@ def draw(df, title, path, only, pl):
 CACHE = {}   # 코인·봉별 마감봉 원본 (카드 그릴 때 다른 봉을 꺼내 씀)
 
 
+# ---------------- 추세선 (노란색) ----------------
+def find_swings(vals, k, high=True):
+    """좌우 k봉보다 높은(낮은) 봉의 위치 목록 = 고점(저점)"""
+    out = []
+    for i in range(k, len(vals) - k):
+        window = vals[i - k:i + k + 1]
+        if (high and vals[i] == max(window)) or ((not high) and vals[i] == min(window)):
+            out.append(i)
+    return out
+
+
+def find_trendline(d, kind):
+    """kind='down': 고점들을 이은 하락 추세선, kind='up': 저점들을 이은 상승 추세선.
+    선이 지나온 구간에서 가격이 선을 뚫지 않은 것만 인정. 못 찾으면 None.
+    돌려주는 값: (시작 위치, 시작 가격, 끝 위치, 끝 가격)"""
+    n = len(d)
+    if kind == "down":
+        vals = list(d["h"].values)
+        swings = find_swings(vals, TREND_K, True)
+    else:
+        vals = list(d["l"].values)
+        swings = find_swings(vals, TREND_K, False)
+    for b in reversed(swings[-3:]):      # 최근 고점(저점) 3개 중에서 뒤쪽 점 고르기
+        for a in swings:                 # 앞쪽 점은 오래된 것부터 (선이 길수록 좋음)
+            if b - a < 5:
+                break
+            if kind == "down" and vals[a] <= vals[b]:
+                continue
+            if kind == "up" and vals[a] >= vals[b]:
+                continue
+            slope = (vals[b] - vals[a]) / (b - a)
+            ok = True
+            for x in range(a, n - 1):    # 마지막(진행 중) 봉은 제외하고 선을 뚫었는지 확인
+                line = vals[a] + slope * (x - a)
+                if kind == "down" and vals[x] > line * (1 + TREND_TOL):
+                    ok = False
+                    break
+                if kind == "up" and vals[x] < line * (1 - TREND_TOL):
+                    ok = False
+                    break
+            if ok:
+                return a, vals[a], n - 1, vals[a] + slope * (n - 1 - a)
+    return None
+
+
+def draw_trendlines(ax, d):
+    """가격 차트에 노란 추세선(하락선·상승선)을 그림"""
+    first = True
+    for kind in ("down", "up"):
+        t = find_trendline(d, kind)
+        if t:
+            x0, y0, x1, y1 = t
+            ax.plot([x0, x1], [y0, y1], color=TREND_COLOR, linewidth=2.4,
+                    label="추세선" if first else None)
+            first = False
+
+
 def draw_card(dfs, sig, title, pl, primary, path):
     """일봉·4시간·1시간·15분을 한 장(2x2)에 그림. 신호난 선은 굵게, 진입·손절·익절은 신호난 봉 칸에만."""
     from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
@@ -412,6 +472,10 @@ def draw_card(dfs, sig, title, pl, primary, path):
                 axp.plot(x, d[c], color=color, lw=2.2, label=label)
             else:
                 axp.plot(x, d[c], color=color, lw=0.7, alpha=0.5)
+        # 노란 추세선 (선이 멀리 뻗어도 차트 가격 범위는 그대로 유지)
+        y_lo, y_hi = axp.get_ylim()
+        draw_trendlines(axp, d)
+        axp.set_ylim(y_lo, y_hi)
         mark = "  ★ " + "+".join(names) if names else ""
         axp.set_title(f"{bn} ({bar}){mark}", fontsize=11, loc="left", fontweight="bold" if names else "normal")
         if names:
