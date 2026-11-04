@@ -39,6 +39,8 @@ WORKERS = 4          # 코인 봉 데이터를 동시에 몇 개씩 받을지(�
 SLOPE_BARS = 5       # 선의 방향을 볼 봉 개수
 SLOPE_ATR = 0.3      # 그 사이 선이 ATR의 0.3배 이상 움직여야 '방향 있음'
 SLOPE_LINES = ("EMA10", "거가중100")   # 방향을 확인할 선 (승률이 낮았던 것)
+CARD_BARS = 120      # 카드(4칸 사진) 한 칸에 보여줄 봉 개수
+TREND_EXT = 20       # 추세선을 차트 오른쪽으로 몇 봉만큼 더 늘려 그릴지
 TREND_K = 2          # 추세선 고점/저점 판단: 좌우 몇 봉보다 높아야(낮아야) 고점(저점)으로 볼지
 TREND_TOL = 0.03     # 추세선 여유: 차트 높이(고점-저점)의 3%까지는 꼬리가 선을 넘어도 봐줌
 TREND_BAD = 1        # 선을 넘은 봉이 이 개수 이하면 인정
@@ -440,13 +442,17 @@ def find_trendline(d, kind):
 
 
 def draw_trendlines(ax, d):
-    """가격 차트에 노란 추세선(하락선·상승선)을 그림"""
+    """가격 차트에 노란 추세선(하락선·상승선)을 그림. 선은 오른쪽으로 TREND_EXT봉만큼 더 늘려 그림"""
     first = True
+    n = len(d)
     for kind in ("down", "up"):
         t = find_trendline(d, kind)
         if t:
             x0, y0, x1, y1 = t
-            ax.plot([x0, x1], [y0, y1], color=TREND_COLOR, linewidth=3.0,
+            slope = (y1 - y0) / (x1 - x0) if x1 != x0 else 0
+            x_end = n - 1 + TREND_EXT
+            y_end = y0 + slope * (x_end - x0)
+            ax.plot([x0, x_end], [y0, y_end], color=TREND_COLOR, linewidth=3.0,
                     label="추세선" if first else None)
             first = False
 
@@ -469,7 +475,7 @@ def draw_card(dfs, sig, title, pl, primary, path):
         if df is None or len(df) < 30:
             axp.set_title(f"{bn} (데이터 없음)", fontsize=11, loc="left")
             continue
-        d = df.iloc[-80:].reset_index(drop=True)
+        d = df.iloc[-CARD_BARS:].reset_index(drop=True)
         x = np.arange(len(d))
         col = np.where((d["c"] >= d["o"]).values, "#2e9e44", "#d62728")
         axp.vlines(x, d["l"], d["h"], colors=col, linewidth=0.8)
@@ -480,10 +486,11 @@ def draw_card(dfs, sig, title, pl, primary, path):
                 axp.plot(x, d[c], color=color, lw=2.2, label=label)
             else:
                 axp.plot(x, d[c], color=color, lw=0.7, alpha=0.5)
-        # 노란 추세선 (선이 멀리 뻗어도 차트 가격 범위는 그대로 유지)
+        # 노란 추세선 (선이 멀리 뻗어도 차트 가격 범위는 그대로 유지, 오른쪽에 빈 공간을 만들어 선을 연장)
         y_lo, y_hi = axp.get_ylim()
         draw_trendlines(axp, d)
         axp.set_ylim(y_lo, y_hi)
+        axp.set_xlim(-1, len(d) + TREND_EXT)
         mark = "  ★ " + "+".join(names) if names else ""
         axp.set_title(f"{bn} ({bar}){mark}", fontsize=11, loc="left", fontweight="bold" if names else "normal")
         if names:
