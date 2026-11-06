@@ -9,6 +9,9 @@ concurrency:
   group: near-alert
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -34,5 +37,11 @@ jobs:
           START=$SECONDS
           while [ $((SECONDS - START)) -lt 20000 ]; do
             timeout 900 python main.py || echo "실행 실패 또는 시간초과"
+            git add state.json || true
+            if ! git diff --cached --quiet; then
+              git -c user.name=bot -c user.email=bot@users.noreply.github.com commit -qm "state" || true
+              git pull -q --rebase || true
+              git push -q || true
+            fi
             sleep 240
           done
