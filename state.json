@@ -1,1 +1,1 @@
-{"coin_last": {}, "wait": [], "open": [], "done": []}
+{"coin_last": {"LINK-USDT-SWAP|\uc20f": 1793954087572}, "wait": [], "open": [{"inst": "LINK-USDT-SWAP", "bar": "15m", "kind": "EMA50 \ud295\uae40", "side": "\uc20f", "entry": 10.762, "sl": 10.853435724016371, "tp": 10.624846413975444, "ts": 1793952900000}], "done": [], "LINK-USDT-SWAP@15m|\uc120": 1793952900000}
