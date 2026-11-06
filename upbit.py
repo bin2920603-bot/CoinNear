@@ -50,13 +50,15 @@ def won(v):
     return m.um(v) + "원"
 
 
-def alert(df, state, key, ts, pl, kind, coin, market, bar, title, head, lines, ratio, t1d, t4h, d24):
+def alert(df, state, key, ts, pl, kind, coin, market, bar, title, head, lines, ratio, t1d, t4h, d24, dfs):
     if state.get(key) == ts:
         return
     side, entry, sl, tp = pl
     if abs(tp / entry - 1) < m.MIN_TP:
         return
-    m.draw(df, title, "chart.png", lines, pl)
+    cards = dict(dfs)
+    cards[bar] = df                          # 신호가 난 봉은 진행 중인 봉까지 포함해서 그림
+    m.draw_card(cards, {bar: lines}, title, pl, bar, "chart.png")   # 일봉·4시간·1시간·15분 4칸 카드
     cap = (f"{head}\n"
            f"진입가: {m.fmt(entry)}원\n"
            f"손절가: {m.fmt(sl)}원 ({(sl / entry - 1) * 100:+.2f}%)\n"
@@ -113,7 +115,7 @@ def main():
                     alert(df, state, f"{tag}|선", ts, pl, f"{label} {kind}", coin, market, bar,
                           f"[{bn}] {coin} 매수 · {both} {kind}",
                           f"[{bn}] 매수 · {coin} · {both} {kind}",
-                          names_, ratio, t1d, t4h, d24)
+                          names_, ratio, t1d, t4h, d24, dfs)
                 if ratio < m.CROSS_SURGE or not m.candle_ok(df, want):
                     continue
                 for f, s_ in m.PAIRS:
@@ -123,7 +125,7 @@ def main():
                     alert(df, state, f"{tag}|골크|{f}-{s_}", ts, pl, "골크", coin, market, bar,
                           f"[{bn}] {coin} 골크 임박 · EMA{f}×EMA{s_} · 매수",
                           f"[{bn}] 골크 임박 · {coin} · EMA{f}×EMA{s_} → 매수",
-                          [f"EMA{f}", f"EMA{s_}"], ratio, t1d, t4h, d24)
+                          [f"EMA{f}", f"EMA{s_}"], ratio, t1d, t4h, d24, dfs)
                 res = m.align_check(df)
                 if res and res[0] == "정배열":
                     _, f, s_ = res
@@ -131,7 +133,7 @@ def main():
                     alert(df, state, f"{tag}|정배열", ts, pl, "정배열", coin, market, bar,
                           f"[{bn}] {coin} 정배열 임박 · 매수",
                           f"[{bn}] 정배열 임박 · {coin} · 마지막 남은 EMA{f}×EMA{s_} → 매수",
-                          [f"EMA{n}" for n in m.ALIGN], ratio, t1d, t4h, d24)
+                          [f"EMA{n}" for n in m.ALIGN], ratio, t1d, t4h, d24, dfs)
             except Exception as e:
                 print(market, bar, "error:", e)
     m.update_scores(state, cache)
