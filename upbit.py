@@ -17,6 +17,7 @@ matplotlib.axes.Axes.set_ylabel = lambda self, s, *a, **k: _ylabel(self, s.repla
 
 # 업비트는 따로 만든 알림방(CHAT_UPBIT)으로 보냄
 m.CHAT = os.environ.get("CHAT_UPBIT")
+m.DAY_OPEN_KST = 9    # 업비트 일봉은 한국시간 오전 9시에 시작·마감
 
 
 def candles(market, bar, live=False):
