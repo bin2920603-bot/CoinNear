@@ -20,6 +20,83 @@ m.CHAT = os.environ.get("CHAT_UPBIT")
 m.DAY_OPEN_KST = 9    # 업비트 일봉은 한국시간 오전 9시에 시작·마감
 
 
+# ---- 업비트 카드 4칸에도 지지·저항 박스 + 과매도/과매수 표시를 얹음 (OKX 쪽 main.py의 카드는 안 건드림) ----
+Z_PIVOT = 5            # 앞뒤 5봉보다 높/낮으면 고점/저점
+Z_PCT = 0.015          # 가격이 이 비율 안에 모이면 같은 박스
+Z_RSI_LOW, Z_RSI_HIGH = 30, 70   # 이 값 이하 파란 ▲(과매도) / 이상 빨간 ▼(과매수)
+
+
+def _pivots(h, l):
+    hi, lo = [], []
+    for i in range(Z_PIVOT, len(h) - Z_PIVOT):
+        if h[i] >= max(h[i - Z_PIVOT:i + Z_PIVOT + 1]):
+            hi.append(h[i])
+        if l[i] <= min(l[i - Z_PIVOT:i + Z_PIVOT + 1]):
+            lo.append(l[i])
+    return hi, lo
+
+
+def _zones(pts, price, above):
+    """비슷한 가격의 고/저점을 묶어 박스로 만듦. 현재가 위(저항)/아래(지지) 가까운 2개만"""
+    groups = []
+    for p in sorted(pts):
+        if groups and p <= groups[-1][0] * (1 + Z_PCT):
+            groups[-1][1].append(p)
+            groups[-1][0] = p
+        else:
+            groups.append([p, [p]])
+    zs = [(min(g[1]), max(g[1])) for g in groups]
+    if above:
+        zs = sorted([z for z in zs if z[0] > price], key=lambda z: z[0])
+    else:
+        zs = sorted([z for z in zs if z[1] < price], key=lambda z: -z[1])
+    return zs[:2]
+
+
+def _extras(ax, d):
+    h, l, c = d["h"].tolist(), d["l"].tolist(), d["c"].tolist()
+    price = c[-1]
+    hi, lo = _pivots(h, l)
+    for zl, zh in _zones(lo, price, False):                  # 지지: 초록 박스
+        ax.axhspan(zl * 0.997, zh * 1.003, color="#2e7d32", alpha=0.18, zorder=0)
+    for zl, zh in _zones(hi, price, True):                   # 저항: 빨강 박스
+        ax.axhspan(zl * 0.997, zh * 1.003, color="#c62828", alpha=0.18, zorder=0)
+    y0, y1 = ax.get_ylim()
+    gap = (y1 - y0) * 0.025
+    rs = d["rsi12"].tolist()
+    for i in range(len(d)):
+        if rs[i] != rs[i]:
+            continue
+        if rs[i] <= Z_RSI_LOW:
+            ax.scatter(i, l[i] - gap, marker="^", s=28, color="#1565c0", zorder=5)
+        elif rs[i] >= Z_RSI_HIGH:
+            ax.scatter(i, h[i] + gap, marker="v", s=28, color="#d50000", zorder=5)
+    e20, e50, e120 = d["ema20"].iloc[-1], d["ema50"].iloc[-1], d["ema120"].iloc[-1]
+    if e20 == e20 and e50 == e50 and e120 == e120:
+        if e20 > e50 > e120:
+            txt, col = "정배열 ▲", "#2e7d32"
+        elif e20 < e50 < e120:
+            txt, col = "역배열 ▼", "#c62828"
+        else:
+            txt, col = "혼조 ─", "#555555"
+        ax.text(0.99, 0.97, txt, transform=ax.transAxes, ha="right", va="top", fontsize=9, fontweight="bold", color=col)
+
+
+_orig_trend = m.draw_trendlines
+
+
+def _trend_plus(ax, d):
+    """원래 노란 추세선을 그린 뒤, 지지·저항 박스와 ▲▼를 얹음 (실패해도 카드는 그대로)"""
+    _orig_trend(ax, d)
+    try:
+        _extras(ax, d)
+    except Exception as e:
+        print("[박스 오류]", e)
+
+
+m.draw_trendlines = _trend_plus
+
+
 def candles(market, bar, live=False):
     rows, to = [], None
     for _ in range(2):                       # 업비트는 한 번에 200개라 두 번 받음
