@@ -674,6 +674,14 @@ def draw_card(dfs, sig, title, pl, primary, path):
             ax.tick_params(labelsize=7)
         axp.tick_params(labelsize=8)
         axv.set_yticks([])
+        # 거래대금 숫자: 맨 위 한 줄(지금·20봉 평균·배수) + 마지막 막대 위에 숫자
+        tv = d["turn"].values
+        base = tv[-21:-1].mean() if len(tv) > 21 else tv[:-1].mean()
+        rt = tv[-1] / base if base > 0 else 0
+        axv.margins(y=0.45)
+        axv.text(len(tv) - 1, tv[-1], um(tv[-1]), fontsize=7, ha="right", va="bottom", color="#333")
+        axv.text(0.01, 0.97, f"거래대금  지금 {um(tv[-1])} · 20봉 평균 {um(base)} ({rt:.1f}배)",
+                 transform=axv.transAxes, fontsize=8, va="top", ha="left", fontweight="bold", color="#333")
         for ax in (axp, axh, axr, axm):
             plt.setp(ax.get_xticklabels(), visible=False)
         axv.set_xticks([])
